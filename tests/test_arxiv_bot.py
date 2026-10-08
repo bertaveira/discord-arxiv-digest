@@ -8,8 +8,8 @@ from unittest import mock
 import numpy as np
 import pytest
 
-from arxiv_bot import digest, seeds
-from arxiv_bot.commands import SeedCommands, score_embed
+from arxiv_bot import commands, digest, seeds
+from arxiv_bot.commands import SeedCommands, digest_command, score_embed
 from arxiv_bot.config import Config
 from arxiv_bot.feed import parse_abstracts, parse_feed
 from arxiv_bot.scoring import Match, score_papers
@@ -318,7 +318,36 @@ def test_shared_embedder_loads_once_and_frees_when_idle():
     assert len(loads) == 2
 
 
+def test_command_digest_shows_todays_post_privately(papers, seeded, monkeypatch):
+    monkeypatch.setattr(commands, "fetch_feed", lambda categories: FIXTURE.read_bytes())
+    interaction = FakeInteraction()
+    asyncio.run(digest_command(seeded, FakeEmbedder(), CONFIG).callback(interaction))
+    send = interaction.followup.send.call_args
+    assert send.args[0] == "Today's post as it would look, from 3 new papers (nothing was posted):"
+    assert send.kwargs["ephemeral"] is True
+    assert send.kwargs["embed"].title == "📄 arXiv cs.CV / cs.GR · Thu 8 Oct 2026 · 2 papers"
+    assert seeded.unseen(p.arxiv_id for p in papers) == {p.arxiv_id for p in papers}
+
+
+def test_command_digest_on_an_empty_feed(seeded, monkeypatch):
+    monkeypatch.setattr(commands, "fetch_feed", lambda categories: b"<rss><channel></channel></rss>")
+    interaction = FakeInteraction()
+    asyncio.run(digest_command(seeded, FakeEmbedder(), CONFIG).callback(interaction))
+    assert interaction.followup.send.call_args.args[0].startswith("arXiv's feed is empty right now")
+
+
 # Digest
+
+
+def test_digest_pages(papers):
+    config = replace(Config.load(CONFIG), relevant=0.95, borderline=0.9)
+    matches = [Match(papers[0], 0.97, "A"), Match(papers[1], 0.92, "B"), Match(papers[3], 0.5, "C")]
+    (relevant, shown_r), (borderline, shown_b) = digest.pages(matches, config)
+    assert [m.seed for m in shown_r] == ["A"] and [m.seed for m in shown_b] == ["B"]
+    assert relevant.title.endswith("· 1 paper") and relevant.footer.text is None
+    assert borderline.title == "Probably not relevant · 1 paper scoring 0.900–0.950"
+    assert borderline.footer.text == digest.FOOTER
+    assert digest.pages(matches[2:], config) == []
 
 
 def test_digest_line(papers):

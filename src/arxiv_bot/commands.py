@@ -1,5 +1,5 @@
-"""Slash commands for the seed papers: /seeds list, /seeds add, /seeds remove,
-/seeds score.
+"""Slash commands: /seeds list, /seeds add, /seeds remove, /seeds score for the
+seed papers, and /digest to see today's post on demand.
 
 Anyone in the server can use them; admins can restrict them per role or channel
 under Server Settings → Integrations without code changes.
@@ -16,7 +16,8 @@ from discord.utils import escape_markdown
 
 from . import digest
 from .config import Config
-from .scoring import Embedder
+from .feed import fetch_feed, parse_feed
+from .scoring import Embedder, score_papers
 from .seeds import (
     NAME_LENGTH,
     NOT_AN_ID,
@@ -142,6 +143,34 @@ class SeedCommands(app_commands.Group):
             await interaction.followup.send("Couldn't score that paper right now. Try again in a minute.", ephemeral=True)
             return
         await interaction.followup.send(embed=score_embed(result, Config.load(self.config_path)), ephemeral=True)
+
+
+def digest_command(store: Store, embedder: Embedder, config_path: Path) -> app_commands.Command:
+    @app_commands.command(name="digest", description="Run today's paper check now and show the result only to you")
+    async def run_digest(interaction: discord.Interaction) -> None:
+        # Scoring the whole feed takes a minute or two on a small CPU.
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        config = Config.load(config_path)
+        try:
+            papers = parse_feed(await asyncio.to_thread(fetch_feed, config.categories))
+            matches = await asyncio.to_thread(score_papers, papers, config, store, embedder)
+        except Exception:
+            log.exception("/digest failed")
+            await interaction.followup.send("Couldn't check today's papers. Try again in a minute.", ephemeral=True)
+            return
+
+        pages = digest.pages(matches, config)
+        if not papers:
+            message = "arXiv's feed is empty right now. It has no announcements on Friday and Saturday nights (New York time)."
+        elif not pages:
+            message = f"None of today's {len(matches)} new papers scores {config.borderline:.3f} or more."
+        else:
+            message = f"Today's post as it would look, from {len(matches)} new papers (nothing was posted):"
+        await interaction.followup.send(message, embed=pages[0][0] if pages else discord.utils.MISSING, ephemeral=True)
+        for embed, _ in pages[1:]:
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+    return run_digest
 
 
 def score_embed(result: PaperScore, config: Config) -> discord.Embed:

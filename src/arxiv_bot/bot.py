@@ -13,7 +13,7 @@ from discord import app_commands
 from discord.ext import tasks
 
 from . import digest
-from .commands import SeedCommands
+from .commands import SeedCommands, digest_command
 from .config import Config
 from .embedding import SharedSpecter2
 from .feed import Paper, fetch_feed, parse_feed
@@ -50,6 +50,7 @@ class ArxivBot(discord.Client):
         channel = await self.fetch_channel(self.channel_id)
         guild = discord.Object(id=channel.guild.id)
         self.tree.add_command(SeedCommands(self.store, self.embedder, self.config_path), guild=guild)
+        self.tree.add_command(digest_command(self.store, self.embedder, self.config_path), guild=guild)
         await self.tree.sync(guild=guild)
 
         self.daily.start()
@@ -75,28 +76,11 @@ class ArxivBot(discord.Client):
         # Embedding takes a minute or two on a small CPU; keep it off the event loop
         # so the connection to Discord stays alive.
         new, matches = await asyncio.to_thread(self._score_new_papers, config)
-        relevant = [m for m in matches if m.score >= config.relevant]
-        borderline = [m for m in matches if config.borderline <= m.score < config.relevant]
-        log.info("%d new papers: %d relevant, %d borderline", len(new), len(relevant), len(borderline))
-
-        sections = []
-        if relevant:
-            title = digest.relevant_title(config.categories, relevant[0].paper.announced, len(relevant))
-            sections.append((title, relevant, digest.ARXIV_RED))
-        if borderline:
-            title = digest.borderline_title(len(borderline), config.borderline, config.relevant)
-            sections.append((title, borderline, digest.GREY))
-        pages = [
-            (title if i == 0 else None, page, color)
-            for title, section, color in sections
-            for i, page in enumerate(digest.paginate(section))
-        ]
+        pages = digest.pages(matches, config)
+        log.info("%d new papers, %d posted", len(new), sum(len(page) for _, page in pages))
         if pages:
             channel = self.get_channel(self.channel_id) or await self.fetch_channel(self.channel_id)
-            for n, (title, page, color) in enumerate(pages):
-                embed = discord.Embed(title=title, description=digest.render(page), color=color)
-                if n == len(pages) - 1:
-                    embed.set_footer(text=digest.FOOTER)
+            for embed, page in pages:
                 await channel.send(embed=embed)
                 self.store.mark_seen(m.paper.arxiv_id for m in page)
         self.store.mark_seen(p.arxiv_id for p in new)

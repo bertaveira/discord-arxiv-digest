@@ -6,8 +6,10 @@ from collections.abc import Callable
 from datetime import date
 from typing import TypeVar
 
+import discord
 from discord.utils import escape_markdown
 
+from .config import Config
 from .scoring import Match
 from .store import Seed
 
@@ -20,6 +22,27 @@ ARXIV_RED = 0xB31B1B
 GREY = 0x6B7280
 
 FOOTER = "Each paper: similarity score · most similar seed paper"
+
+
+def pages(matches: list[Match], config: Config) -> list[tuple[discord.Embed, list[Match]]]:
+    """The embeds of a daily post (relevant, then probably not relevant), each with
+    the matches it shows. Empty when nothing reaches the borderline cutoff."""
+    relevant = [m for m in matches if m.score >= config.relevant]
+    borderline = [m for m in matches if config.borderline <= m.score < config.relevant]
+    sections = []
+    if relevant:
+        title = relevant_title(config.categories, relevant[0].paper.announced, len(relevant))
+        sections.append((title, relevant, ARXIV_RED))
+    if borderline:
+        sections.append((borderline_title(len(borderline), config.borderline, config.relevant), borderline, GREY))
+    result = [
+        (discord.Embed(title=title if i == 0 else None, description=render(page), color=color), page)
+        for title, section, color in sections
+        for i, page in enumerate(paginate(section))
+    ]
+    if result:
+        result[-1][0].set_footer(text=FOOTER)
+    return result
 
 
 def relevant_title(categories: list[str], announced: date, count: int) -> str:

@@ -47,6 +47,10 @@ CPU such as an Intel N100.
    ```
 
    The first run downloads the SPECTER2 model (~450 MB) into `data/huggingface`.
+6. **Check it works.** Run `/digest` in any channel: after a minute or two it
+   shows you today's post exactly as the bot would make it. Only you see it, and
+   nothing is posted or marked as seen, so you can run it as often as you like
+   (also handy while tuning the cutoffs).
 
 ## Seeds
 
@@ -72,13 +76,14 @@ before every run, so edits apply without a restart). In practice scores fall
 between about 0.80 and 0.97, and a 0.005 change is noticeable. Adding seeds raises
 the scores of papers near them, so volume grows with the seed list.
 
-To see what the current settings would post today, with each paper's score:
+To see what the current settings would post today, run `/digest` in Discord, or
+on the command line (inside the container: `docker compose exec arxiv-bot arxiv-bot dry-run`):
 
 ```sh
 uv run arxiv-bot dry-run
 ```
 
-It lists both sections plus the next few papers below the borderline cutoff.
+The command line version also lists the next few papers below the borderline cutoff.
 
 ## Development
 
