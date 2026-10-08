@@ -4,6 +4,7 @@ papers, titles and abstracts by ID from the arXiv API."""
 from __future__ import annotations
 
 import re
+import unicodedata
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -69,7 +70,7 @@ def _parse_item(item: ET.Element) -> Paper:
         arxiv_id=re.sub(r"v\d+$", "", item.findtext("link", "").split("/abs/", 1)[-1]),
         title=_squash(item.findtext("title", "")),
         abstract=_squash(abstract),
-        authors=tuple(a.strip() for a in authors if a.strip()),
+        authors=tuple(detex(a.strip()) for a in authors if a.strip()),
         categories=tuple(c.text for c in item.findall("category") if c.text),
         announce_type=item.findtext("arxiv:announce_type", "", _NS),
         announced=parsedate_to_datetime(item.findtext("pubDate", "")).date(),
@@ -78,3 +79,22 @@ def _parse_item(item: ET.Element) -> Paper:
 
 def _squash(text: str) -> str:
     return " ".join(text.split())
+
+
+# arXiv keeps author names as typed, often with LaTeX accents: L\"oschner, Garc\'{\i}a, \v{S}imon.
+_TEX_LETTERS = {"i": "i", "j": "j", "o": "ø", "O": "Ø", "l": "ł", "L": "Ł", "ss": "ß", "aa": "å", "AA": "Å", "ae": "æ", "AE": "Æ"}
+_TEX_ACCENTS = {
+    '"': "\u0308", "'": "\u0301", "`": "\u0300", "^": "\u0302", "~": "\u0303", "=": "\u0304", ".": "\u0307",
+    "v": "\u030c", "c": "\u0327", "u": "\u0306", "H": "\u030b", "k": "\u0328",
+}
+
+
+def detex(text: str) -> str:
+    """Turn LaTeX accents and special letters into Unicode ("L\\"oschner" -> "Löschner")."""
+    text = re.sub(r"\\(ss|aa|AA|ae|AE|[ijoOlL])(?![A-Za-z])\s?", lambda m: _TEX_LETTERS[m.group(1)], text)
+    text = re.sub(
+        r"""\\(["'`^~=.]|[vcuHk](?=[\s{]))\s*\{?\s*([A-Za-z])\}?""",
+        lambda m: m.group(2) + _TEX_ACCENTS[m.group(1)],
+        text,
+    )
+    return unicodedata.normalize("NFC", text.replace("{", "").replace("}", ""))

@@ -159,16 +159,26 @@ def digest_command(store: Store, embedder: Embedder, config_path: Path) -> app_c
             await interaction.followup.send("Couldn't check today's papers. Try again in a minute.", ephemeral=True)
             return
 
-        pages = digest.pages(matches, config)
+        post = digest.build_post(matches, config)
         if not papers:
             message = "arXiv's feed is empty right now. It has no announcements on Friday and Saturday nights (New York time)."
-        elif not pages:
-            message = f"None of today's {len(matches)} new papers scores {config.borderline:.3f} or more."
-        else:
-            message = f"Today's post as it would look, from {len(matches)} new papers (nothing was posted):"
-        await interaction.followup.send(message, embed=pages[0][0] if pages else discord.utils.MISSING, ephemeral=True)
-        for embed, _ in pages[1:]:
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(message, ephemeral=True)
+            return
+        if post is None:
+            below = sum(1 for m in matches if m.score >= config.borderline)
+            message = (
+                f"Nothing would be posted today: none of the {len(matches)} new papers scores {config.relevant:.3f} "
+                f"or more ({below} {'is' if below == 1 else 'are'} between {config.borderline:.3f} and {config.relevant:.3f})."
+            )
+            await interaction.followup.send(message, ephemeral=True)
+            return
+
+        # Same embeds as the real post; the thread part is labelled since a private reply can't have threads.
+        captions = {0: "Today's post as it would look (nothing was posted). In the channel:"}
+        if post.thread:
+            captions[len(post.main)] = f"In a thread named **{post.thread_name}**:"
+        for i, (embed, _) in enumerate(post.main + post.thread):
+            await interaction.followup.send(captions.get(i, discord.utils.MISSING), embed=embed, ephemeral=True)
 
     return run_digest
 
@@ -180,7 +190,7 @@ def score_embed(result: PaperScore, config: Config) -> discord.Embed:
         verdict = f"**Relevant**: it would be in the main list (≥ {config.relevant:.3f})."
         advice = "Your seeds already cover it, so adding it would change little."
     elif score >= config.borderline:
-        verdict = f"**Probably not relevant**: it would be in the grey list ({config.borderline:.3f}–{config.relevant:.3f})."
+        verdict = f"**Probably not relevant**: it would be in the thread under the post ({config.borderline:.3f}–{config.relevant:.3f})."
         advice = "Adding it as a seed would move papers like it into the main list."
     else:
         verdict = f"**Not posted**: it scores below {config.borderline:.3f}."

@@ -5,13 +5,15 @@ from datetime import date, time
 from pathlib import Path
 from unittest import mock
 
+import discord
 import numpy as np
 import pytest
 
+from arxiv_bot import bot as bot_module
 from arxiv_bot import commands, digest, seeds
 from arxiv_bot.commands import SeedCommands, digest_command, score_embed
 from arxiv_bot.config import Config
-from arxiv_bot.feed import parse_abstracts, parse_feed
+from arxiv_bot.feed import detex, parse_abstracts, parse_feed
 from arxiv_bot.scoring import Match, score_papers
 from arxiv_bot.embedding import SharedSpecter2
 from arxiv_bot.seeds import (
@@ -45,6 +47,7 @@ class FakeEmbedder:
     name = "fake"
     vectors = {
         "Splat seed": [1, 0, 0],
+        "Far seed": [-1, 0, 0],
         "NeRF seed": [0, 1, 0],
         "Fast Gaussian Splatting for [Large] Scenes": [0.9, 0.1, 0],
         "Relighting Neural Radiance Fields": [0.1, 0.95, 0],
@@ -281,7 +284,7 @@ def test_command_score(seeded, arxiv):
     embed = interaction.followup.send.call_args.kwargs["embed"]
     assert embed.title.startswith("EDGS: Eliminating")
     assert embed.description.startswith("**0.921** · closest seed: **Splats**")
-    assert "grey list" in embed.description
+    assert "in the thread under the post" in embed.description
     assert seeded.seed_by_id("2504.13204") is None  # scoring never adds it
 
 
@@ -318,14 +321,22 @@ def test_shared_embedder_loads_once_and_frees_when_idle():
     assert len(loads) == 2
 
 
-def test_command_digest_shows_todays_post_privately(papers, seeded, monkeypatch):
+def low_borderline_config(tmp_path):
+    """The repo config with borderline 0.05, so the fixture's classification paper (0.099) lands in the thread."""
+    path = tmp_path / "config.toml"
+    path.write_text(CONFIG.read_text().replace("borderline = 0.91", "borderline = 0.05"))
+    return path
+
+
+def test_command_digest_shows_todays_post_privately(tmp_path, papers, seeded, monkeypatch):
     monkeypatch.setattr(commands, "fetch_feed", lambda categories: FIXTURE.read_bytes())
     interaction = FakeInteraction()
-    asyncio.run(digest_command(seeded, FakeEmbedder(), CONFIG).callback(interaction))
-    send = interaction.followup.send.call_args
-    assert send.args[0] == "Today's post as it would look, from 3 new papers (nothing was posted):"
-    assert send.kwargs["ephemeral"] is True
-    assert send.kwargs["embed"].title == "📄 arXiv cs.CV / cs.GR · Thu 8 Oct 2026 · 2 papers"
+    asyncio.run(digest_command(seeded, FakeEmbedder(), low_borderline_config(tmp_path)).callback(interaction))
+    (main, thread) = interaction.followup.send.call_args_list
+    assert main.args[0] == "Today's post as it would look (nothing was posted). In the channel:"
+    assert main.kwargs["embed"].description.startswith("-# 2 relevant from 3 new cs.CV / cs.GR papers")
+    assert thread.args[0] == "In a thread named **Probably not relevant · 1 paper**:"
+    assert all(call.kwargs["ephemeral"] for call in (main, thread))
     assert seeded.unseen(p.arxiv_id for p in papers) == {p.arxiv_id for p in papers}
 
 
@@ -336,39 +347,152 @@ def test_command_digest_on_an_empty_feed(seeded, monkeypatch):
     assert interaction.followup.send.call_args.args[0].startswith("arXiv's feed is empty right now")
 
 
+# Posting
+
+
+class FakeThread:
+    def __init__(self, refuse=False):
+        self.embeds, self.refuse = [], refuse
+
+    async def send(self, embed):
+        if self.refuse:
+            raise discord.Forbidden(mock.Mock(status=403, reason="Forbidden"), "Missing Permissions")
+        self.embeds.append(embed)
+
+
+class FakeChannel:
+    def __init__(self, thread=None, thread_error=None):
+        self.embeds, self.threads = [], []
+        self.thread, self.thread_error = thread, thread_error
+
+    async def send(self, embed):
+        self.embeds.append(embed)
+        channel = self
+
+        class Message:
+            async def create_thread(self, name, auto_archive_duration):
+                if channel.thread_error:
+                    raise channel.thread_error
+                channel.threads.append(name)
+                return channel.thread
+
+        return Message()
+
+
+def post_with(tmp_path, seeded, monkeypatch, channel):
+    seeded.set_meta("initial_seeds_imported", "1")
+    monkeypatch.setattr(bot_module, "fetch_feed", lambda categories: FIXTURE.read_bytes())
+
+    async def run_once():
+        bot = bot_module.ArxivBot(1, low_borderline_config(tmp_path), seeded)
+        bot.embedder = FakeEmbedder()
+        monkeypatch.setattr(bot, "get_channel", lambda channel_id: channel)
+        await bot._post_new_papers()
+
+    asyncio.run(run_once())
+
+
+def test_bot_posts_relevant_papers_with_the_rest_in_a_thread(tmp_path, papers, seeded, monkeypatch):
+    thread = FakeThread()
+    channel = FakeChannel(thread)
+    post_with(tmp_path, seeded, monkeypatch, channel)
+    assert [e.title for e in channel.embeds] == ["arXiv · Thursday 8 October"]
+    assert "Relighting Neural Radiance Fields" in channel.embeds[0].description
+    assert channel.threads == ["Probably not relevant · 1 paper"]
+    assert "An Article on Image Classification" in thread.embeds[0].description
+    assert seeded.unseen(p.arxiv_id for p in papers) == set()
+
+
+@pytest.mark.parametrize(
+    "channel",
+    [
+        FakeChannel(thread_error=discord.Forbidden(mock.Mock(status=403, reason="Forbidden"), "Missing Permissions")),
+        FakeChannel(thread=FakeThread(refuse=True)),
+    ],
+    ids=["cannot create thread", "cannot post in thread"],
+)
+def test_bot_falls_back_to_the_channel_without_thread_permissions(tmp_path, papers, seeded, monkeypatch, channel):
+    post_with(tmp_path, seeded, monkeypatch, channel)
+    assert len(channel.embeds) == 2
+    assert "An Article on Image Classification" in channel.embeds[1].description
+    assert seeded.unseen(p.arxiv_id for p in papers) == set()
+
+
 # Digest
 
 
-def test_digest_pages(papers):
+def test_build_post(papers):
     config = replace(Config.load(CONFIG), relevant=0.95, borderline=0.9)
-    matches = [Match(papers[0], 0.97, "A"), Match(papers[1], 0.92, "B"), Match(papers[3], 0.5, "C")]
-    (relevant, shown_r), (borderline, shown_b) = digest.pages(matches, config)
-    assert [m.seed for m in shown_r] == ["A"] and [m.seed for m in shown_b] == ["B"]
-    assert relevant.title.endswith("· 1 paper") and relevant.footer.text is None
-    assert borderline.title == "Probably not relevant · 1 paper scoring 0.900–0.950"
-    assert borderline.footer.text == digest.FOOTER
-    assert digest.pages(matches[2:], config) == []
-
-
-def test_digest_line(papers):
-    match = Match(papers[0], 0.9512, "3DGS")
-    assert digest.line(match) == (
-        "• [Fast Gaussian Splatting for (Large) Scenes](https://arxiv.org/abs/2610.00001) · 0.951 · 3DGS"
+    matches = [Match(papers[0], 0.97, "3DGS"), Match(papers[1], 0.92, "NeRF"), Match(papers[3], 0.5, "Other")]
+    post = digest.build_post(matches, config)
+    ((main, shown),) = post.main
+    assert [m.seed for m in shown] == ["3DGS"]
+    assert main.title == "arXiv · Thursday 8 October"
+    assert main.description == (
+        "-# 1 relevant from 3 new cs.CV / cs.GR papers\n"
+        "**[Fast Gaussian Splatting for (Large) Scenes](https://arxiv.org/abs/2610.00001)**\n"
+        "-# Ada Lovelace, Alan Turing\n"
+        "-# ≈ 3DGS · 0.970"
     )
+    assert main.footer.text == digest.FOOTER
+    assert post.thread_name == "Probably not relevant · 1 paper"
+    ((thread, _),) = post.thread
+    assert thread.description == (
+        "-# Scoring 0.900–0.950. These didn't make the main list.\n"
+        "[Relighting Neural Radiance Fields](https://arxiv.org/abs/2610.00002) · 0.920"
+    )
+
+
+def test_no_post_without_relevant_papers(papers):
+    config = replace(Config.load(CONFIG), relevant=0.95, borderline=0.9)
+    assert digest.build_post([Match(papers[1], 0.92, "NeRF")], config) is None
+    assert digest.build_post([Match(papers[3], 0.5, "Other")], config) is None
+
+
+def test_command_digest_says_why_nothing_would_be_posted(seeded, monkeypatch):
+    monkeypatch.setattr(commands, "fetch_feed", lambda categories: FIXTURE.read_bytes())
+    interaction = FakeInteraction()
+    seeded.remove_seed("Splats")
+    seeded.remove_seed("NeRF")
+    seeded.add_seed(Seed("Far", "9999.00009", "Far seed", "..."))
+    asyncio.run(digest_command(seeded, FakeEmbedder(), CONFIG).callback(interaction))
+    assert interaction.followup.send.call_args.args[0].startswith(
+        "Nothing would be posted today: none of the 3 new papers scores 0.930 or more"
+    )
+
+
+def test_author_list():
+    assert digest.author_list(("Ada Lovelace",)) == "Ada Lovelace"
+    assert digest.author_list(("Ada Lovelace", "Alan Turing (Bletchley Park)")) == "Ada Lovelace, Alan Turing"
+    many = tuple(f"Author {i}" for i in range(1, 35))
+    assert digest.author_list(many) == ", ".join(f"Author {i}" for i in range(1, 11)) + " +24 more"
+
+
+def test_long_posts_continue_in_more_messages(papers):
+    config = replace(Config.load(CONFIG), relevant=0.95, borderline=0.9)
+    authors = tuple(f"Author Number {i}" for i in range(12))
+    many = [Match(replace(papers[0], arxiv_id=f"2610.{i:05d}", authors=authors), 0.96, "3DGS") for i in range(60)]
+    post = digest.build_post(many, config)
+    assert len(post.main) > 1
+    embeds = [embed for embed, _ in post.main]
+    assert [e.title for e in embeds] == ["arXiv · Thursday 8 October"] + [None] * (len(embeds) - 1)
+    assert embeds[0].description.startswith("-# 60 relevant") and not embeds[1].description.startswith("-#")
+    assert [e.footer.text for e in embeds] == [None] * (len(embeds) - 1) + [digest.FOOTER]
+    assert all(len(e.description) <= digest.DESCRIPTION_LIMIT for e in embeds)
+    assert sum(len(shown) for _, shown in post.main) == 60
+
+
+def test_detex_author_names():
+    assert detex(r'Fabian L\"oschner') == "Fabian Löschner"
+    assert detex(r"Ram\'on Garc\'{\i}a") == "Ramón García"
+    assert detex(r"\v{S}imon {\o}stergaard, Erd\H{o}s") == "Šimon østergaard, Erdős"
 
 
 def test_digest_paginate_respects_limit(papers):
     many = [Match(replace(papers[0], arxiv_id=f"2610.{i:05d}"), 0.95, "3DGS") for i in range(200)]
-    pages = digest.paginate(many, limit=1000)
+    pages = digest.paginate(many, digest.entry, limit=1000)
     assert sum(len(p) for p in pages) == 200
-    assert all(len(digest.render(p)) <= 1000 for p in pages)
-
-
-def test_digest_titles():
-    assert digest.relevant_title(["cs.CV", "cs.GR"], date(2026, 10, 8), 1) == (
-        "📄 arXiv cs.CV / cs.GR · Thu 8 Oct 2026 · 1 paper"
-    )
-    assert digest.borderline_title(5, 0.91, 0.93) == "Probably not relevant · 5 papers scoring 0.910–0.930"
+    assert all(len(digest.render(p, digest.entry)) <= 1000 for p in pages)
 
 
 # Store and config

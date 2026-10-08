@@ -47,7 +47,14 @@ class ArxivBot(discord.Client):
             log.exception("Importing the seeds from config.toml failed; retrying before the next post")
 
         # Register the commands for this server only, where they appear immediately.
-        channel = await self.fetch_channel(self.channel_id)
+        try:
+            channel = await self.fetch_channel(self.channel_id)
+        except (discord.Forbidden, discord.NotFound) as e:
+            raise SystemExit(
+                f"The bot can't see channel {self.channel_id} ({e.text}). Check that DISCORD_CHANNEL_ID is the "
+                "channel's ID (the last number in its link), that the bot was invited to that server, and that "
+                "the channel lets the bot View Channel, Send Messages and Embed Links."
+            ) from None
         guild = discord.Object(id=channel.guild.id)
         self.tree.add_command(SeedCommands(self.store, self.embedder, self.config_path), guild=guild)
         self.tree.add_command(digest_command(self.store, self.embedder, self.config_path), guild=guild)
@@ -76,14 +83,40 @@ class ArxivBot(discord.Client):
         # Embedding takes a minute or two on a small CPU; keep it off the event loop
         # so the connection to Discord stays alive.
         new, matches = await asyncio.to_thread(self._score_new_papers, config)
-        pages = digest.pages(matches, config)
-        log.info("%d new papers, %d posted", len(new), sum(len(page) for _, page in pages))
-        if pages:
+        post = digest.build_post(matches, config)
+        if post is None:
+            log.info("%d new papers, none to post", len(new))
+        else:
+            log.info(
+                "%d new papers: %d relevant, %d in the thread",
+                len(new), sum(len(p) for _, p in post.main), sum(len(p) for _, p in post.thread),
+            )
             channel = self.get_channel(self.channel_id) or await self.fetch_channel(self.channel_id)
-            for embed, page in pages:
-                await channel.send(embed=embed)
+            for embed, page in post.main:
+                message = await channel.send(embed=embed)
                 self.store.mark_seen(m.paper.arxiv_id for m in page)
+            if post.thread:
+                target = await self._open_thread(message, post.thread_name) or channel
+                for embed, page in post.thread:
+                    try:
+                        await target.send(embed=embed)
+                    except discord.Forbidden as e:
+                        if target is channel:
+                            raise
+                        # Missing Send Messages in Threads; post in the channel instead of losing the list.
+                        log.warning("Couldn't post in the thread (%s); posting the list in the channel", e.text)
+                        target = channel
+                        await target.send(embed=embed)
+                    self.store.mark_seen(m.paper.arxiv_id for m in page)
         self.store.mark_seen(p.arxiv_id for p in new)
+
+    async def _open_thread(self, message: discord.Message, name: str) -> discord.Thread | None:
+        try:
+            return await message.create_thread(name=name, auto_archive_duration=1440)
+        except discord.HTTPException as e:
+            # Most likely missing Create Public Threads; post in the channel instead of losing the list.
+            log.warning("Couldn't create the thread (%s); posting the list in the channel", e.text)
+            return None
 
     def _score_new_papers(self, config: Config) -> tuple[list[Paper], list[Match]]:
         import_initial_seeds(self.store, config)  # no-op once done

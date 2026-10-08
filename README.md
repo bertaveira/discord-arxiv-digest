@@ -2,18 +2,22 @@
 
 A Discord bot that posts each day's new arXiv papers (cs.CV and cs.GR by default)
 that are similar to a list of seed papers the server cares about. It stays silent
-on days with nothing to post.
+on days with no relevant papers, and arXiv announces nothing on Friday and Saturday
+nights (New York time), so there are no posts on weekends.
 
 Papers come from arXiv's daily announcement feed (`rss.arxiv.org`). New papers and
 cross-lists are scored; updated versions of older papers are not. Each paper is
 embedded with [SPECTER2](https://huggingface.co/allenai/specter2) and scored by its
 cosine similarity to the closest seed paper. Two cutoffs split the results:
 
-- **Relevant** (score ≥ `relevant`): the main list.
-- **Probably not relevant** (`borderline` ≤ score < `relevant`): a second, grey
-  list showing what sits just below the line, so the cutoffs are easy to tune.
+- **Relevant** (score ≥ `relevant`): posted in the channel. Each paper shows its
+  title as a link, its authors (up to 10, then "+N more"), and its closest seed and
+  score. Lists too long for one message continue in further messages.
+- **Probably not relevant** (`borderline` ≤ score < `relevant`): a compact list in
+  a thread on that message, showing what sits just below the line so the cutoffs
+  are easy to tune without flooding the channel.
 
-Each line shows the paper's score and the seed it is most similar to. A SQLite file
+A SQLite file
 records which papers have been processed, so restarts and the hourly retries never
 score or post a paper twice.
 
@@ -29,12 +33,17 @@ CPU such as an Intel N100.
    *None*, then turn off *Bot → Public Bot* (Discord refuses the second step
    while an install link is set).
 2. **Invite it** (replace `APP_ID` with the application ID). This grants View
-   Channel, Send Messages and Embed Links, plus slash commands:
-   `https://discord.com/oauth2/authorize?client_id=APP_ID&scope=bot+applications.commands&permissions=19456`
-   If the bot is already in the server without slash commands, open the link again;
-   re-authorizing adds them without removing anything.
+   Channel, Send Messages, Embed Links, Create Public Threads and Send Messages in
+   Threads, plus slash commands:
+   `https://discord.com/oauth2/authorize?client_id=APP_ID&scope=bot+applications.commands&permissions=309237664768`
+   If the bot is already in the server, open the link again; re-authorizing adds
+   the missing permissions and commands without removing anything.
 3. **Make the channel read-only.** In the channel's permissions, deny *Send
-   Messages* for `@everyone` and allow it for the bot's role.
+   Messages* and *Send Messages in Threads* for `@everyone`. Allow the bot *View
+   Channel*, *Send Messages*, *Embed Links*, *Create Public Threads* and *Send
+   Messages in Threads* (a private channel needs these set on the channel itself).
+   Without the thread permissions the bot posts the probably-not-relevant list in
+   the channel instead.
 4. **Configure.** Copy `.env.example` to `.env` and fill in the token and the
    channel ID (enable Developer Mode in Discord, then right-click the channel →
    *Copy Channel ID*). Edit `config/config.toml` for cutoffs, post time and
