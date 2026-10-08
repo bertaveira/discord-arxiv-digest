@@ -1,5 +1,5 @@
 """Slash commands: /seeds list, /seeds add, /seeds remove, /seeds score for the
-seed papers, and /digest to see today's post on demand.
+seed papers, and /digest to post today's papers on demand.
 
 Anyone in the server can use them; admins can restrict them per role or channel
 under Server Settings → Integrations without code changes.
@@ -17,6 +17,7 @@ from discord.utils import escape_markdown
 from . import digest
 from .config import Config
 from .feed import fetch_feed, parse_feed
+from .posting import deliver
 from .scoring import Embedder, score_papers
 from .seeds import (
     NAME_LENGTH,
@@ -146,39 +147,33 @@ class SeedCommands(app_commands.Group):
 
 
 def digest_command(store: Store, embedder: Embedder, config_path: Path) -> app_commands.Command:
-    @app_commands.command(name="digest", description="Run today's paper check now and show the result only to you")
+    @app_commands.command(name="digest", description="Run today's paper check now and post the result here")
     async def run_digest(interaction: discord.Interaction) -> None:
         # Scoring the whole feed takes a minute or two on a small CPU.
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(thinking=True)
         config = Config.load(config_path)
         try:
             papers = parse_feed(await asyncio.to_thread(fetch_feed, config.categories))
             matches = await asyncio.to_thread(score_papers, papers, config, store, embedder)
         except Exception:
             log.exception("/digest failed")
-            await interaction.followup.send("Couldn't check today's papers. Try again in a minute.", ephemeral=True)
+            await interaction.followup.send("Couldn't check today's papers. Try again in a minute.")
             return
 
         post = digest.build_post(matches, config)
         if not papers:
-            message = "arXiv's feed is empty right now. It has no announcements on Friday and Saturday nights (New York time)."
-            await interaction.followup.send(message, ephemeral=True)
-            return
-        if post is None:
+            await interaction.followup.send(
+                "arXiv's feed is empty right now. It has no announcements on Friday and Saturday nights (New York time)."
+            )
+        elif post is None:
             below = sum(1 for m in matches if m.score >= config.borderline)
-            message = (
-                f"Nothing would be posted today: none of the {len(matches)} new papers scores {config.relevant:.3f} "
+            await interaction.followup.send(
+                f"Nothing to post today: none of the {len(matches)} new papers scores {config.relevant:.3f} "
                 f"or more ({below} {'is' if below == 1 else 'are'} between {config.borderline:.3f} and {config.relevant:.3f})."
             )
-            await interaction.followup.send(message, ephemeral=True)
-            return
-
-        # Same embeds as the real post; the thread part is labelled since a private reply can't have threads.
-        captions = {0: "Today's post as it would look (nothing was posted). In the channel:"}
-        if post.thread:
-            captions[len(post.main)] = f"In a thread named **{post.thread_name}**:"
-        for i, (embed, _) in enumerate(post.main + post.thread):
-            await interaction.followup.send(captions.get(i, discord.utils.MISSING), embed=embed, ephemeral=True)
+        else:
+            # The same post as the daily one, but nothing is marked as seen: the daily post still comes as usual.
+            await deliver(post, interaction.channel, lambda embed: interaction.followup.send(embed=embed, wait=True))
 
     return run_digest
 

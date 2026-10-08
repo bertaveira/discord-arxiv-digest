@@ -67,6 +67,7 @@ class FakeEmbedder:
 
 class FakeInteraction:
     user = "alice"
+    channel = None
 
     def __init__(self):
         self.response = mock.AsyncMock()
@@ -328,16 +329,29 @@ def low_borderline_config(tmp_path):
     return path
 
 
-def test_command_digest_shows_todays_post_privately(tmp_path, papers, seeded, monkeypatch):
+def test_command_digest_posts_publicly_with_a_thread(tmp_path, papers, seeded, monkeypatch):
+    monkeypatch.setattr(commands, "fetch_feed", lambda categories: FIXTURE.read_bytes())
+    thread = FakeThread()
+    interaction = FakeInteraction()
+    interaction.channel = FakeChannel(thread)
+    interaction.followup.send.return_value = "the post"
+    asyncio.run(digest_command(seeded, FakeEmbedder(), low_borderline_config(tmp_path)).callback(interaction))
+    assert not interaction.response.defer.call_args.kwargs.get("ephemeral", False)
+    (main,) = interaction.followup.send.call_args_list
+    assert not main.kwargs.get("ephemeral", False)
+    assert main.kwargs["embed"].description.startswith("-# 2 relevant from 3 new cs.CV / cs.GR papers")
+    assert interaction.channel.threads == [("Probably not relevant · 1 paper", "the post")]
+    assert "An Article on Image Classification" in thread.embeds[0].description
+    assert seeded.unseen(p.arxiv_id for p in papers) == {p.arxiv_id for p in papers}  # the daily post still comes
+
+
+def test_command_digest_without_threads_posts_the_list_after_the_post(tmp_path, seeded, monkeypatch):
     monkeypatch.setattr(commands, "fetch_feed", lambda categories: FIXTURE.read_bytes())
     interaction = FakeInteraction()
+    interaction.channel = object()  # e.g. run inside a thread, where no thread can be started
     asyncio.run(digest_command(seeded, FakeEmbedder(), low_borderline_config(tmp_path)).callback(interaction))
-    (main, thread) = interaction.followup.send.call_args_list
-    assert main.args[0] == "Today's post as it would look (nothing was posted). In the channel:"
-    assert main.kwargs["embed"].description.startswith("-# 2 relevant from 3 new cs.CV / cs.GR papers")
-    assert thread.args[0] == "In a thread named **Probably not relevant · 1 paper**:"
-    assert all(call.kwargs["ephemeral"] for call in (main, thread))
-    assert seeded.unseen(p.arxiv_id for p in papers) == {p.arxiv_id for p in papers}
+    main, rest = interaction.followup.send.call_args_list
+    assert "An Article on Image Classification" in rest.kwargs["embed"].description
 
 
 def test_command_digest_on_an_empty_feed(seeded, monkeypatch):
@@ -361,22 +375,21 @@ class FakeThread:
 
 
 class FakeChannel:
+    """A text channel that records what is sent and which message each thread starts from."""
+
     def __init__(self, thread=None, thread_error=None):
         self.embeds, self.threads = [], []
         self.thread, self.thread_error = thread, thread_error
 
     async def send(self, embed):
         self.embeds.append(embed)
-        channel = self
+        return f"message {len(self.embeds)}"
 
-        class Message:
-            async def create_thread(self, name, auto_archive_duration):
-                if channel.thread_error:
-                    raise channel.thread_error
-                channel.threads.append(name)
-                return channel.thread
-
-        return Message()
+    async def create_thread(self, name, message, auto_archive_duration):
+        if self.thread_error:
+            raise self.thread_error
+        self.threads.append((name, message))
+        return self.thread
 
 
 def post_with(tmp_path, seeded, monkeypatch, channel):
@@ -398,7 +411,7 @@ def test_bot_posts_relevant_papers_with_the_rest_in_a_thread(tmp_path, papers, s
     post_with(tmp_path, seeded, monkeypatch, channel)
     assert [e.title for e in channel.embeds] == ["arXiv · Thursday 8 October"]
     assert "Relighting Neural Radiance Fields" in channel.embeds[0].description
-    assert channel.threads == ["Probably not relevant · 1 paper"]
+    assert channel.threads == [("Probably not relevant · 1 paper", "message 1")]
     assert "An Article on Image Classification" in thread.embeds[0].description
     assert seeded.unseen(p.arxiv_id for p in papers) == set()
 
@@ -457,7 +470,7 @@ def test_command_digest_says_why_nothing_would_be_posted(seeded, monkeypatch):
     seeded.add_seed(Seed("Far", "9999.00009", "Far seed", "..."))
     asyncio.run(digest_command(seeded, FakeEmbedder(), CONFIG).callback(interaction))
     assert interaction.followup.send.call_args.args[0].startswith(
-        "Nothing would be posted today: none of the 3 new papers scores 0.930 or more"
+        "Nothing to post today: none of the 3 new papers scores 0.930 or more"
     )
 
 

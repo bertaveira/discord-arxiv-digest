@@ -17,6 +17,7 @@ from .commands import SeedCommands, digest_command
 from .config import Config
 from .embedding import SharedSpecter2
 from .feed import Paper, fetch_feed, parse_feed
+from .posting import deliver
 from .scoring import Match, score_papers
 from .seeds import import_initial_seeds
 from .store import Store
@@ -92,31 +93,13 @@ class ArxivBot(discord.Client):
                 len(new), sum(len(p) for _, p in post.main), sum(len(p) for _, p in post.thread),
             )
             channel = self.get_channel(self.channel_id) or await self.fetch_channel(self.channel_id)
-            for embed, page in post.main:
-                message = await channel.send(embed=embed)
-                self.store.mark_seen(m.paper.arxiv_id for m in page)
-            if post.thread:
-                target = await self._open_thread(message, post.thread_name) or channel
-                for embed, page in post.thread:
-                    try:
-                        await target.send(embed=embed)
-                    except discord.Forbidden as e:
-                        if target is channel:
-                            raise
-                        # Missing Send Messages in Threads; post in the channel instead of losing the list.
-                        log.warning("Couldn't post in the thread (%s); posting the list in the channel", e.text)
-                        target = channel
-                        await target.send(embed=embed)
-                    self.store.mark_seen(m.paper.arxiv_id for m in page)
+            await deliver(
+                post,
+                channel,
+                lambda embed: channel.send(embed=embed),
+                lambda page: self.store.mark_seen(m.paper.arxiv_id for m in page),
+            )
         self.store.mark_seen(p.arxiv_id for p in new)
-
-    async def _open_thread(self, message: discord.Message, name: str) -> discord.Thread | None:
-        try:
-            return await message.create_thread(name=name, auto_archive_duration=1440)
-        except discord.HTTPException as e:
-            # Most likely missing Create Public Threads; post in the channel instead of losing the list.
-            log.warning("Couldn't create the thread (%s); posting the list in the channel", e.text)
-            return None
 
     def _score_new_papers(self, config: Config) -> tuple[list[Paper], list[Match]]:
         import_initial_seeds(self.store, config)  # no-op once done

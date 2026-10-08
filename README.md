@@ -56,10 +56,11 @@ CPU such as an Intel N100.
    ```
 
    The first run downloads the SPECTER2 model (~450 MB) into `data/huggingface`.
-6. **Check it works.** Run `/digest` in any channel: after a minute or two it
-   shows you today's post exactly as the bot would make it. Only you see it, and
-   nothing is posted or marked as seen, so you can run it as often as you like
-   (also handy while tuning the cutoffs).
+6. **Check it works.** Run `/digest` in any channel: after a minute or two the bot
+   posts today's papers there, exactly like the daily post, thread included.
+   Everyone in the channel sees it. Nothing is marked as seen, so the daily post
+   still comes as usual and you can run it as often as you like (also handy while
+   tuning the cutoffs).
 
 ## Seeds
 
