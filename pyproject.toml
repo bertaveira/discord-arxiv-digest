@@ -1,0 +1,32 @@
+[project]
+name = "arxiv-bot"
+version = "0.1.0"
+description = "Discord bot that posts the day's arXiv papers similar to a set of seed papers"
+requires-python = ">=3.12"
+dependencies = [
+    "adapters>=1.3",
+    "discord.py>=2.4",
+    "numpy",
+    "torch",
+    "transformers",
+    "tzdata", # zoneinfo data for slim container images
+]
+
+[project.scripts]
+arxiv-bot = "arxiv_bot.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# CPU-only PyTorch: the CUDA build is several GB and the bot never uses a GPU.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

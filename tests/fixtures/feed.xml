@@ -1,0 +1,54 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<rss xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0">
+  <channel>
+    <title>cs.CV, cs.GR updates on arXiv.org</title>
+    <link>http://rss.arxiv.org/rss/cs.CV+cs.GR</link>
+    <item>
+      <title>Fast Gaussian Splatting for [Large]   Scenes</title>
+      <link>https://arxiv.org/abs/2610.00001</link>
+      <description>arXiv:2610.00001v1 Announce Type: new
+Abstract: We speed up 3DGS training
+on city-scale captures.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.00001v1</guid>
+      <category>cs.CV</category>
+      <category>cs.GR</category>
+      <pubDate>Thu, 08 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>new</arxiv:announce_type>
+      <dc:creator>Ada Lovelace, Alan Turing</dc:creator>
+    </item>
+    <item>
+      <title>Relighting Neural Radiance Fields</title>
+      <link>https://arxiv.org/abs/2610.00002</link>
+      <description>arXiv:2610.00002v1 Announce Type: cross
+Abstract: NeRFs that support relighting.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.00002v1</guid>
+      <category>cs.LG</category>
+      <category>cs.CV</category>
+      <pubDate>Thu, 08 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>cross</arxiv:announce_type>
+      <dc:creator>Grace Hopper</dc:creator>
+    </item>
+    <item>
+      <title>A Revised Ray-Tracing Paper</title>
+      <link>https://arxiv.org/abs/2601.00003</link>
+      <description>arXiv:2601.00003v3 Announce Type: replace
+Abstract: Version 3 of an older ray tracing paper.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2601.00003v3</guid>
+      <category>cs.GR</category>
+      <pubDate>Thu, 08 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>replace</arxiv:announce_type>
+      <dc:creator>Edsger Dijkstra</dc:creator>
+    </item>
+    <item>
+      <title>An Article on Image Classification</title>
+      <link>https://arxiv.org/abs/2610.00004</link>
+      <description>arXiv:2610.00004v1 Announce Type: new
+Abstract: Nothing about the keywords here, but MRI reconstruction is mentioned.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.00004v1</guid>
+      <category>cs.CV</category>
+      <pubDate>Thu, 08 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>new</arxiv:announce_type>
+      <dc:creator>Barbara Liskov</dc:creator>
+    </item>
+  </channel>
+</rss>

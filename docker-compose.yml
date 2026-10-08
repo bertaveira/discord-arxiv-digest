@@ -1,0 +1,10 @@
+services:
+  arxiv-bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Mount the directory, not the file: editors that save by replacing the
+      # file would otherwise leave the container reading the old version.
+      - ./config:/config:ro
+      - ./data:/data

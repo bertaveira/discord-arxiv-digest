@@ -1,0 +1,57 @@
+# Re-read before every run, so cutoff edits apply without restarting the bot.
+# Changes to the schedule (post_time, timezone, retry_hours) need a restart.
+
+# arXiv categories to follow. arXiv merges them into one feed without duplicates.
+categories = ["cs.CV", "cs.GR"]
+
+# "new" = first announcement, "cross" = cross-listed from another category.
+# ("replace" / "replace-cross" are updated versions of older papers.)
+announce_types = ["new", "cross"]
+
+# When to post, in `timezone`. arXiv refreshes the feed at midnight US Eastern
+# (04:00 or 05:00 UTC) on Sunday-Thursday nights. The bot checks again every hour
+# for `retry_hours` in case the feed is late; a paper is never posted twice.
+post_time = "08:00"
+timezone = "UTC"
+retry_hours = 3
+
+[similarity]
+# Each paper is scored by how similar it is to its closest seed paper (SPECTER2
+# cosine similarity; in practice scores fall between about 0.80 and 0.97).
+# Papers at or above `relevant` are posted as the main list. Papers between
+# `borderline` and `relevant` are posted under "Probably not relevant", so you
+# can see what sits just below the line. Over three weeks of cs.CV + cs.GR,
+# 0.93 averaged ~6 relevant papers a day (2 on the quietest day, 16 on the busiest).
+relevant = 0.93
+borderline = 0.91
+
+[seeds]
+# The starting list of papers the server cares about: "name shown in posts" = "arXiv ID".
+# Imported into the bot's database the first time it runs. After that the list is
+# managed from Discord with /seeds list, /seeds add and /seeds remove, and changes
+# here are ignored.
+
+# Gaussian splatting
+"3DGS" = "2308.04079"
+"2DGS" = "2403.17888"
+"3DGS-MCMC" = "2404.09591"
+"Taming 3DGS" = "2406.15643"
+"StopThePop" = "2402.00525"
+"EDGS" = "2504.13204"
+"Faster-GS" = "2602.09999"
+"HiGS" = "2606.00352"
+
+# Ray tracing, foams and meshes
+"3DGRT" = "2407.07090"
+"3DGUT" = "2412.12507"
+"Radiant Foam" = "2502.01157"
+"Power Foam" = "2604.24994"
+"Radiance Meshes" = "2512.04076"
+"VoroTracing" = "2608.17682"
+
+# NeRF family
+"NeRF" = "2003.08934"
+"Mip-NeRF" = "2103.13415"
+"Mip-NeRF 360" = "2111.12077"
+"Zip-NeRF" = "2304.06706"
+"Instant NGP" = "2201.05989"
