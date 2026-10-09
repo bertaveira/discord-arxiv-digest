@@ -9,10 +9,11 @@ categories = ["cs.CV", "cs.GR"]
 announce_types = ["new", "cross"]
 
 # When to post, in `timezone`. arXiv refreshes the feed at midnight US Eastern
-# (04:00 or 05:00 UTC) on Sunday-Thursday nights. The bot checks again every hour
-# for `retry_hours` in case the feed is late; a paper is never posted twice.
+# (06:00 Stockholm time, 05:00 for a week or two when US and EU daylight saving
+# dates differ) on Sunday-Thursday nights. The bot checks again every hour for
+# `retry_hours` in case the feed is late; a paper is never posted twice.
 post_time = "08:00"
-timezone = "UTC"
+timezone = "Europe/Stockholm"
 retry_hours = 3
 
 [similarity]
